@@ -1,12 +1,13 @@
 // app/_layout.tsx
-import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import { useFonts } from "expo-font";
-import "./global.css";
-import { useEffect, useState } from "react";
 import { ClerkProvider } from "@clerk/clerk-expo";
 import { tokenCache } from "@clerk/clerk-expo/token-cache"; // ✅ add this
+import { useFonts } from "expo-font";
+import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { useEffect, useState } from "react";
 import { LogBox, View } from "react-native";
+import 'react-native-get-random-values';
+import "./global.css";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 LogBox.ignoreLogs(["Clerk:"]);

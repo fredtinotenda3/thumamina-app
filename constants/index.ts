@@ -70,27 +70,26 @@ export const icons = {
   target,
   to,
 };
-
 export const onboarding = [
   {
     id: 1,
-    title: "The perfect ride is just a tap away!",
+    title: "📍 Your delivery, your way.",
     description:
-      "Your delivery begins with Thuma. Find your ideal ride effortlessly.",
+        "📲 Book, track, and get updates — we handle the ride, you relax.",
     image: images.onboarding1,
   },
   {
     id: 2,
-    title: "Best Bike in your hands with Thuma Mina",
+    title: "🛵 Reliable bikes. Trusted riders.",
     description:
-      "Discover the convenience of finding your perfect delivery with Thuma",
+        "✅ Our trained riders deliver your packages safely — every time.",
     image: images.onboarding2,
   },
   {
     id: 3,
-    title: "Your ride, your way. Let's go!",
+    title: "🚀 Fast delivery is just a tap away!",
     description:
-      "Enter your destination, sit back, and let us take care of the rest.",
+        "📦 Your package starts moving with ThumaMina — fast, easy, and seamless.",
     image: images.onboarding3,
   },
 ];
