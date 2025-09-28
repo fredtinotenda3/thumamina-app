@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Text, View } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE, MapType } from "react-native-maps";
+import MapView, { MapType, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
 
 import { icons } from "@/constants";
 import { useFetch } from "@/lib/fetch";
 import {
-    calculateDriverTimes,
-    calculateRegion,
-    generateMarkersFromData,
+  calculateDriverTimes,
+  calculateRegion,
+  generateMarkersFromData,
 } from "@/lib/map";
 import { useDriverStore, useLocationStore } from "@/store";
 import { Driver, MarkerData } from "@/types/type";
@@ -16,161 +16,361 @@ import { Driver, MarkerData } from "@/types/type";
 const directionsAPI = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
 
 const SAFE_MAP_TYPE: MapType =
-    Platform.OS === "ios" ? "mutedStandard" : "standard"; // mutedStandard is iOS-only
+  Platform.OS === "ios" ? "mutedStandard" : "standard";
+
+// Helper function to validate coordinates - handle both numbers and strings
+const isValidCoordinate = (coord: number | string | null): boolean => {
+  if (typeof coord === "number") {
+    return !isNaN(coord) && coord !== 0;
+  }
+  if (typeof coord === "string") {
+    const num = parseFloat(coord);
+    return !isNaN(num) && num !== 0;
+  }
+  return false;
+};
+
+// Helper to convert coordinate to number for MapView
+const coordToNumber = (coord: number | string | null): number | null => {
+  if (typeof coord === "number") return coord;
+  if (typeof coord === "string") {
+    const num = parseFloat(coord);
+    return !isNaN(num) ? num : null;
+  }
+  return null;
+};
+
+// Safe coordinate formatter for display
+const formatCoordinate = (
+  coord: number | string | null | undefined
+): string => {
+  if (coord === null || coord === undefined) return "N/A";
+
+  const num = typeof coord === "string" ? parseFloat(coord) : coord;
+  return isNaN(num) ? "N/A" : num.toFixed(4);
+};
 
 export default function Map() {
-    const {
-        userLongitude,
-        userLatitude,
-        destinationLatitude,
-        destinationLongitude,
-    } = useLocationStore();
-    const { selectedDriver, setDrivers } = useDriverStore();
+  const {
+    userLongitude,
+    userLatitude,
+    destinationLatitude,
+    destinationLongitude,
+  } = useLocationStore();
+  const { selectedDriver, setDrivers } = useDriverStore();
 
-    const { data: drivers, loading, error } = useFetch<Driver[]>("/(api)/driver");
-    const [markers, setMarkers] = useState<MarkerData[]>([]);
-    const [directionsError, setDirectionsError] = useState<string | null>(null);
-    const [mapReady, setMapReady] = useState(false);
+  const {
+    data: drivers,
+    loading,
+    error,
+    refetch,
+  } = useFetch<Driver[]>("/(api)/driver");
+  const [markers, setMarkers] = useState<MarkerData[]>([]);
+  const [directionsError, setDirectionsError] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
 
-    useEffect(() => {
-        if (!Array.isArray(drivers)) return;
-        if (typeof userLatitude !== "number" || typeof userLongitude !== "number") return;
+  // Refresh drivers every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refetch();
+      setLastUpdate(Date.now());
+      console.log("Refreshing driver locations...");
+    }, 30000);
 
-        const newMarkers = generateMarkersFromData({
-            data: drivers,
-            userLatitude,
-            userLongitude,
-        });
-        setMarkers(newMarkers);
-    }, [drivers, userLatitude, userLongitude]);
+    return () => clearInterval(interval);
+  }, [refetch]);
 
-    useEffect(() => {
-        if (
-            markers.length > 0 &&
-            typeof destinationLatitude === "number" &&
-            typeof destinationLongitude === "number" &&
-            typeof userLatitude === "number" &&
-            typeof userLongitude === "number"
-        ) {
-            calculateDriverTimes({
-                markers,
-                userLatitude,
-                userLongitude,
-                destinationLatitude,
-                destinationLongitude,
-            }).then((list) => setDrivers(list as MarkerData[]));
-        }
-    }, [
+  // Enhanced marker generation with validation
+  useEffect(() => {
+    if (!Array.isArray(drivers)) {
+      console.log("Drivers data is not an array:", drivers);
+      setMarkers([]);
+      return;
+    }
+
+    const userLat = coordToNumber(userLatitude);
+    const userLng = coordToNumber(userLongitude);
+
+    if (!isValidCoordinate(userLat) || !isValidCoordinate(userLng)) {
+      console.log("Invalid user coordinates:", { userLatitude, userLongitude });
+      setMarkers([]);
+      return;
+    }
+
+    try {
+      console.log("Generating markers for", drivers.length, "drivers");
+
+      const newMarkers = generateMarkersFromData({
+        data: drivers,
+        userLatitude: userLat!,
+        userLongitude: userLng!,
+      });
+
+      console.log("Generated", newMarkers.length, "valid markers");
+      setMarkers(newMarkers);
+
+      // Debug log
+      console.log(
+        "Markers debug:",
+        newMarkers.map((m) => ({
+          id: m.id,
+          lat: m.latitude,
+          lng: m.longitude,
+          latType: typeof m.latitude,
+          lngType: typeof m.longitude,
+        }))
+      );
+    } catch (err) {
+      console.error("Error generating markers:", err);
+      setMarkers([]);
+    }
+  }, [drivers, userLatitude, userLongitude, lastUpdate]);
+
+  useEffect(() => {
+    const userLat = coordToNumber(userLatitude);
+    const userLng = coordToNumber(userLongitude);
+    const destLat = coordToNumber(destinationLatitude);
+    const destLng = coordToNumber(destinationLongitude);
+
+    if (
+      markers.length > 0 &&
+      isValidCoordinate(destLat) &&
+      isValidCoordinate(destLng) &&
+      isValidCoordinate(userLat) &&
+      isValidCoordinate(userLng)
+    ) {
+      console.log("Calculating driver times for", markers.length, "markers");
+
+      calculateDriverTimes({
         markers,
-        destinationLatitude,
-        destinationLongitude,
+        userLatitude: userLat!,
+        userLongitude: userLng!,
+        destinationLatitude: destLat!,
+        destinationLongitude: destLng!,
+      })
+        .then((list) => {
+          if (list && Array.isArray(list)) {
+            const validList = list.filter(
+              (item) =>
+                item &&
+                isValidCoordinate(item.latitude) &&
+                isValidCoordinate(item.longitude)
+            );
+            console.log(
+              "Setting",
+              validList.length,
+              "drivers with calculated times"
+            );
+            setDrivers(validList as MarkerData[]);
+          }
+        })
+        .catch((err) => {
+          console.error("Error calculating driver times:", err);
+        });
+    }
+  }, [
+    markers,
+    destinationLatitude,
+    destinationLongitude,
+    userLatitude,
+    userLongitude,
+    setDrivers,
+  ]);
+
+  const region = useMemo(() => {
+    try {
+      const calculatedRegion = calculateRegion({
         userLatitude,
         userLongitude,
-        setDrivers,
-    ]);
+        destinationLatitude,
+        destinationLongitude,
+      });
 
-    const region = useMemo(() => {
-        try {
-            return calculateRegion({
-                userLatitude,
-                userLongitude,
-                destinationLatitude,
-                destinationLongitude,
-            });
-        } catch {
-            return undefined;
-        }
-    }, [userLatitude, userLongitude, destinationLatitude, destinationLongitude]);
-
-    // Global fallbacks
-    if (loading || typeof userLatitude !== "number" || typeof userLongitude !== "number") {
-        return (
-            <View className="w-full h-full items-center justify-center">
-                <ActivityIndicator />
-                <Text className="mt-2">Loading your location…</Text>
-            </View>
-        );
+      console.log("Calculated region:", calculatedRegion);
+      return calculatedRegion;
+    } catch (error) {
+      console.error("Error calculating region:", error);
+      return {
+        latitude: 37.78825,
+        longitude: -122.4324,
+        latitudeDelta: 0.0922,
+        longitudeDelta: 0.0421,
+      };
     }
+  }, [userLatitude, userLongitude, destinationLatitude, destinationLongitude]);
 
-    if (error) {
-        return (
-            <View className="w-full h-full items-center justify-center px-4">
-                <Text className="text-center">Failed to load drivers: {String(error)}</Text>
-            </View>
-        );
+  // Handle directions errors better
+  const handleDirectionsError = (errorMessage: string) => {
+    console.log("Directions error:", errorMessage);
+
+    if (errorMessage.includes("ZERO_RESULTS")) {
+      setDirectionsError("No route found between these locations");
+    } else if (errorMessage.includes("OVER_QUERY_LIMIT")) {
+      setDirectionsError("Google Maps API limit exceeded");
+    } else if (errorMessage.includes("REQUEST_DENIED")) {
+      setDirectionsError("Google Maps API key invalid");
+    } else {
+      setDirectionsError("Could not calculate route: " + errorMessage);
     }
+  };
 
-    // If we can’t compute a valid region, render a friendly fallback instead of mounting MapView
-    if (!region || Number.isNaN(region.latitude) || Number.isNaN(region.longitude)) {
-        return (
-            <View className="w-full h-full items-center justify-center px-4">
-                <Text className="text-center">
-                    We couldn’t initialize the map. Please check location permissions and try again.
-                </Text>
-            </View>
-        );
-    }
+  // Debug info
+  console.log("Map Debug:", {
+    driversCount: drivers?.length || 0,
+    markersCount: markers.length,
+    userLocation: { userLatitude, userLongitude },
+    destination: { destinationLatitude, destinationLongitude },
+    region,
+    loading,
+    error,
+  });
 
+  // Global fallbacks
+  if (loading) {
     return (
-        <View className="w-full h-full rounded-2xl overflow-hidden">
-            <MapView
-                provider={PROVIDER_GOOGLE}
-                style={{ width: "100%", height: "100%" }}
-                mapType={SAFE_MAP_TYPE}
-                showsPointsOfInterest={false}
-                initialRegion={region}
-                showsUserLocation
-                onMapReady={() => setMapReady(true)}
-                userInterfaceStyle="light" // iOS-only; safe to leave
-            >
-                {markers.map((marker) => (
-                    <Marker
-                        key={marker.id}
-                        coordinate={{ latitude: marker.latitude, longitude: marker.longitude }}
-                        title={marker.title}
-                        image={selectedDriver === +marker.id ? icons.selectedMarker : icons.marker}
-                    />
-                ))}
-
-                {typeof destinationLatitude === "number" &&
-                    typeof destinationLongitude === "number" &&
-                    typeof userLatitude === "number" &&
-                    typeof userLongitude === "number" && (
-                        <React.Fragment>
-                            <Marker
-                                key="destination"
-                                coordinate={{ latitude: destinationLatitude, longitude: destinationLongitude }}
-                                title="Destination"
-                                image={icons.pin}
-                            />
-                            <MapViewDirections
-                                origin={{ latitude: userLatitude, longitude: userLongitude }}
-                                destination={{ latitude: destinationLatitude, longitude: destinationLongitude }}
-                                apikey={directionsAPI ?? ""}
-                                strokeColor="#0286FF"
-                                strokeWidth={2}
-                                onError={(msg) => setDirectionsError(typeof msg === "string" ? msg : "Directions error")}
-                            />
-                        </React.Fragment>
-                    )}
-            </MapView>
-
-            {/* Overlay non-blocking status/errors */}
-            {!mapReady && (
-                <View className="absolute bottom-2 left-2 right-2 items-center">
-                    <View className="px-3 py-2 rounded-xl bg-white/90">
-                        <Text>Loading map…</Text>
-                    </View>
-                </View>
-            )}
-
-            {directionsError && (
-                <View className="absolute top-2 left-2 right-2 items-center">
-                    <View className="px-3 py-2 rounded-xl bg-white/95">
-                        <Text>Couldn’t load route: {directionsError}</Text>
-                    </View>
-                </View>
-            )}
-        </View>
+      <View className="w-full h-full items-center justify-center">
+        <ActivityIndicator />
+        <Text className="mt-2">Loading drivers...</Text>
+      </View>
     );
+  }
+
+  if (error) {
+    return (
+      <View className="w-full h-full items-center justify-center px-4">
+        <Text className="text-center text-red-500">
+          Failed to load drivers: {String(error)}
+        </Text>
+        <Text className="text-center mt-2">
+          Make sure you have online drivers registered.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View className="w-full h-full rounded-2xl overflow-hidden">
+      <MapView
+        provider={PROVIDER_GOOGLE}
+        style={{ width: "100%", height: "100%" }}
+        mapType={SAFE_MAP_TYPE}
+        showsPointsOfInterest={false}
+        region={region}
+        showsUserLocation={true}
+        onMapReady={() => setMapReady(true)}
+        userInterfaceStyle="light"
+      >
+        {/* User Location Marker */}
+        {isValidCoordinate(userLatitude) &&
+          isValidCoordinate(userLongitude) && (
+            <Marker
+              key="user"
+              coordinate={{
+                latitude: coordToNumber(userLatitude)!,
+                longitude: coordToNumber(userLongitude)!,
+              }}
+              title="Your Location"
+              pinColor="blue"
+            />
+          )}
+
+        {/* Driver Markers */}
+        {markers.map((marker) => {
+          const lat = coordToNumber(marker.latitude);
+          const lng = coordToNumber(marker.longitude);
+
+          if (!isValidCoordinate(lat) || !isValidCoordinate(lng)) {
+            console.log(`Skipping invalid marker ${marker.id}:`, { lat, lng });
+            return null;
+          }
+
+          return (
+            <Marker
+              key={marker.id}
+              coordinate={{
+                latitude: lat!,
+                longitude: lng!,
+              }}
+              title={marker.title}
+              description={`${marker.car_seats} seats • Rating: ${marker.rating}`}
+              image={
+                selectedDriver === +marker.id
+                  ? icons.selectedMarker
+                  : icons.marker
+              }
+            />
+          );
+        })}
+
+        {/* Destination and Route */}
+        {isValidCoordinate(destinationLatitude) &&
+          isValidCoordinate(destinationLongitude) && (
+            <React.Fragment>
+              <Marker
+                key="destination"
+                coordinate={{
+                  latitude: coordToNumber(destinationLatitude)!,
+                  longitude: coordToNumber(destinationLongitude)!,
+                }}
+                title="Destination"
+                pinColor="red"
+              />
+              {isValidCoordinate(userLatitude) &&
+                isValidCoordinate(userLongitude) && (
+                  <MapViewDirections
+                    origin={{
+                      latitude: coordToNumber(userLatitude)!,
+                      longitude: coordToNumber(userLongitude)!,
+                    }}
+                    destination={{
+                      latitude: coordToNumber(destinationLatitude)!,
+                      longitude: coordToNumber(destinationLongitude)!,
+                    }}
+                    apikey={directionsAPI ?? ""}
+                    strokeColor="#0286FF"
+                    strokeWidth={4}
+                    onError={(errorMessage) =>
+                      handleDirectionsError(
+                        typeof errorMessage === "string"
+                          ? errorMessage
+                          : "Unknown error"
+                      )
+                    }
+                    onReady={(result) => {
+                      console.log("Directions calculated:", result);
+                      setDirectionsError(null);
+                    }}
+                  />
+                )}
+            </React.Fragment>
+          )}
+      </MapView>
+
+      {/* Debug Info Overlay */}
+      <View className="absolute top-2 left-2 right-2">
+        <View className="bg-black/70 rounded-lg p-3">
+          <Text className="text-white text-sm">
+            Drivers Online: {markers.length}
+          </Text>
+          <Text className="text-white text-sm">
+            Your Location: {formatCoordinate(userLatitude)},{" "}
+            {formatCoordinate(userLongitude)}
+          </Text>
+          {directionsError && (
+            <Text className="text-yellow-400 text-sm">{directionsError}</Text>
+          )}
+        </View>
+      </View>
+
+      {/* Loading Overlay */}
+      {!mapReady && (
+        <View className="absolute bottom-2 left-2 right-2 items-center">
+          <View className="px-3 py-2 rounded-xl bg-white/90">
+            <Text>Loading map…</Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
 }

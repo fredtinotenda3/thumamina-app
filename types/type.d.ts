@@ -1,3 +1,4 @@
+// types/type.ts
 import { TextInputProps, TouchableOpacityProps } from "react-native";
 
 declare interface Driver {
@@ -8,6 +9,10 @@ declare interface Driver {
   car_image_url: string;
   car_seats: number;
   rating: number;
+  // Accept number | string | null because DB/transport may vary; we coerce later
+  latitude: number | string | null;
+  longitude: number | string | null;
+  is_online?: boolean;
 }
 
 declare interface MarkerData {
@@ -104,20 +109,12 @@ declare interface LocationStore {
   destinationLatitude: number | null;
   destinationLongitude: number | null;
   destinationAddress: string | null;
-  setUserLocation: ({
-    latitude,
-    longitude,
-    address,
-  }: {
+  setUserLocation: (args: {
     latitude: number;
     longitude: number;
     address: string;
   }) => void;
-  setDestinationLocation: ({
-    latitude,
-    longitude,
-    address,
-  }: {
+  setDestinationLocation: (args: {
     latitude: number;
     longitude: number;
     address: string;
@@ -137,3 +134,17 @@ declare interface DriverCardProps {
   selected: number;
   setSelected: () => void;
 }
+
+export type {
+  ButtonProps,
+  Driver,
+  DriverCardProps,
+  DriverStore,
+  GoogleInputProps,
+  InputFieldProps,
+  LocationStore,
+  MapProps,
+  MarkerData,
+  PaymentProps,
+  Ride,
+};

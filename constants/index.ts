@@ -5,6 +5,7 @@ import chat from "@/assets/icons/chat.png";
 import checkmark from "@/assets/icons/check.png";
 import close from "@/assets/icons/close.png";
 import dollar from "@/assets/icons/dollar.png";
+import driver from "@/assets/icons/driver.png";
 import email from "@/assets/icons/email.png";
 import eyecross from "@/assets/icons/eyecross.png";
 import google from "@/assets/icons/google.png";
@@ -69,27 +70,28 @@ export const icons = {
   star,
   target,
   to,
+  driver,
 };
 export const onboarding = [
   {
     id: 1,
     title: "📍 Your delivery, your way.",
     description:
-        "📲 Book, track, and get updates — we handle the ride, you relax.",
+      "📲 Book, track, and get updates — we handle the ride, you relax.",
     image: images.onboarding1,
   },
   {
     id: 2,
     title: "🛵 Reliable bikes. Trusted riders.",
     description:
-        "✅ Our trained riders deliver your packages safely — every time.",
+      "✅ Our trained riders deliver your packages safely — every time.",
     image: images.onboarding2,
   },
   {
     id: 3,
     title: "🚀 Fast delivery is just a tap away!",
     description:
-        "📦 Your package starts moving with ThumaMina — fast, easy, and seamless.",
+      "📦 Your package starts moving with ThumaMina — fast, easy, and seamless.",
     image: images.onboarding3,
   },
 ];
