@@ -1,12 +1,21 @@
-// app/(api)/driver+api.ts
 import { neon } from "@neondatabase/serverless";
 
 // GET: return an array of drivers with numeric latitude/longitude
 export async function GET() {
   try {
+    console.log("🚗 Fetching drivers from database...");
+
     const sql = neon(`${process.env.DATABASE_URL}`);
 
-    // Cast DECIMAL → DOUBLE PRECISION so Node gets numbers, not strings
+    // Add more detailed error handling
+    if (!process.env.DATABASE_URL) {
+      console.error("❌ DATABASE_URL is missing");
+      return Response.json(
+        { error: "Database configuration error" },
+        { status: 500 }
+      );
+    }
+
     const rows = await sql /* sql */ `
       SELECT
         id,
@@ -26,12 +35,26 @@ export async function GET() {
       ORDER BY id DESC
     `;
 
-    console.log(`Fetched ${rows.length} valid drivers from database`);
-    // Return a plain array (not {data: ...}) so the client receives Driver[]
-    return Response.json(rows);
-  } catch (error) {
-    console.error("Error fetching drivers:", error);
-    return Response.json({ error: "Internal Server Error" }, { status: 500 });
+    console.log(`✅ Successfully fetched ${rows.length} drivers`);
+
+    return Response.json({ data: rows });
+  } catch (error: any) {
+    // ADD DETAILED ERROR LOGGING
+    console.error("❌ Error fetching drivers:", error);
+    console.error("❌ Error details:", {
+      message: error.message,
+      stack: error.stack,
+      databaseUrl: process.env.DATABASE_URL ? "Set" : "Missing",
+    });
+
+    return Response.json(
+      {
+        error: "Internal Server Error",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -63,14 +86,14 @@ export async function PUT(request: Request) {
       );
     }
 
-    const sql = neon(`${process.env.DATABASE_URL}`);
-
-    console.log("Updating driver location:", {
+    console.log("🔄 Updating driver location via PUT:", {
       driver_id: idNum,
       latitude: latNum,
       longitude: lngNum,
       is_online,
     });
+
+    const sql = neon(`${process.env.DATABASE_URL}`);
 
     const response = await sql /* sql */ `
       UPDATE drivers 
@@ -100,12 +123,19 @@ export async function PUT(request: Request) {
       );
     }
 
-    console.log("Driver location updated successfully:", response[0]);
-    return Response.json(response[0]); // return an object (single row)
+    console.log(
+      "✅ Driver location updated successfully via PUT:",
+      response[0]
+    );
+    return Response.json({ data: response[0] });
   } catch (error: any) {
-    console.error("Error updating driver location:", error);
+    console.error("❌ Error updating driver location via PUT:", error);
     return Response.json(
-      { error: "Failed to update driver location: " + error.message },
+      {
+        error: "Failed to update driver location",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      },
       { status: 500 }
     );
   }

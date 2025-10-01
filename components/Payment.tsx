@@ -1,15 +1,18 @@
-import { useAuth } from "@clerk/clerk-expo";
-import { useStripe } from "@stripe/stripe-react-native";
-import { router } from "expo-router";
-import React, { useState } from "react";
-import { Alert, Image, Text, View } from "react-native";
-import { ReactNativeModal } from "react-native-modal";
+import { useState } from "react";
+import { Alert, Text, TouchableOpacity, View } from "react-native";
 
-import CustomButton from "@/components/CustomButton";
-import { images } from "@/constants";
+import { icons } from "@/constants";
 import { fetchAPI } from "@/lib/fetch";
-import { useLocationStore } from "@/store";
-import { PaymentProps } from "@/types/type";
+import CustomButton from "./CustomButton";
+
+interface PaymentProps {
+  fullName: string;
+  email: string;
+  amount: string;
+  driverId: number;
+  rideTime: number;
+  rideId: number;
+}
 
 const Payment = ({
   fullName,
@@ -17,146 +20,169 @@ const Payment = ({
   amount,
   driverId,
   rideTime,
+  rideId,
 }: PaymentProps) => {
-  const { initPaymentSheet, presentPaymentSheet } = useStripe();
-  const {
-    userAddress,
-    userLongitude,
-    userLatitude,
-    destinationLatitude,
-    destinationAddress,
-    destinationLongitude,
-  } = useLocationStore();
+  const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
 
-  const { userId } = useAuth();
-  const [success, setSuccess] = useState<boolean>(false);
+  // Validate all required props
+  const isValidProps = rideId && driverId && amount && fullName && email;
 
-  const openPaymentSheet = async () => {
-    await initializePaymentSheet();
+  if (!isValidProps) {
+    return (
+      <View className="mt-10 p-4 bg-red-50 rounded-lg">
+        <Text className="text-red-500 text-center font-JakartaSemiBold">
+          Error: Missing payment information
+        </Text>
+        <Text className="text-red-400 text-center text-sm mt-1">
+          Please try booking the ride again
+        </Text>
+      </View>
+    );
+  }
 
-    const { error } = await presentPaymentSheet();
+  const paymentMethods = [
+    { id: "cash", name: "Cash", icon: icons.dollar },
+    { id: "ecocash", name: "EcoCash", icon: icons.dollar },
+    { id: "card", name: "Credit Card", icon: icons.dollar },
+  ];
 
-    if (error) {
-      Alert.alert(`Error code: ${error.code}`, error.message);
-    } else {
-      setSuccess(true);
+  const handlePayment = async () => {
+    if (!selectedMethod) {
+      Alert.alert("Error", "Please select a payment method");
+      return;
     }
-  };
 
-  const initializePaymentSheet = async () => {
-    const { error } = await initPaymentSheet({
-      merchantDisplayName: "Example, Inc.",
-      intentConfiguration: {
-        mode: {
-          amount: parseInt(amount) * 100,
-          currencyCode: "usd",
+    setProcessing(true);
+
+    try {
+      // Update ride with payment method
+      const paymentResponse = await fetchAPI(`/(api)/ride/${rideId}/payment`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_status: "confirmed",
+          payment_method: selectedMethod,
+        }),
+      });
+
+      if (!paymentResponse.data) {
+        throw new Error("Failed to update payment status");
+      }
+
+      // Handle different payment methods
+      let alertMessage = "";
+      let alertTitle = "";
+
+      switch (selectedMethod) {
+        case "cash":
+          alertTitle = "Ride Confirmed!";
+          alertMessage =
+            "Your ride has been confirmed. Please have cash ready for the driver.";
+          break;
+        case "ecocash":
+          alertTitle = "EcoCash Payment";
+          alertMessage =
+            "EcoCash payment will be processed when you start your ride.";
+          break;
+        case "card":
+          alertTitle = "Card Payment";
+          alertMessage = "Card payment will be processed securely.";
+          break;
+        default:
+          alertTitle = "Payment Confirmed";
+          alertMessage = "Your payment has been confirmed.";
+      }
+
+      Alert.alert(alertTitle, alertMessage, [
+        {
+          text: "OK",
+          onPress: () => {
+            console.log("Payment confirmed for ride:", rideId);
+            // Optionally navigate to ride tracking screen
+          },
         },
-        confirmHandler: async (
-          paymentMethod,
-          shouldSavePaymentMethod,
-          intentCreationCallback
-        ) => {
-          const { paymentIntent, customer } = await fetchAPI(
-            "/(api)/(stripe)/create",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                name: fullName || email.split("@")[0],
-                email: email,
-                amount: amount,
-                paymentMethodId: paymentMethod.id,
-              }),
-            }
-          );
+      ]);
 
-          if (paymentIntent.client_secret) {
-            const { result } = await fetchAPI("/(api)/(stripe)/pay", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                payment_method_id: paymentMethod.id,
-                payment_intent_id: paymentIntent.id,
-                customer_id: customer,
-                client_secret: paymentIntent.client_secret,
-              }),
-            });
-
-            if (result.client_secret) {
-              await fetchAPI("/(api)/ride/create", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  origin_address: userAddress,
-                  destination_address: destinationAddress,
-                  origin_latitude: userLatitude,
-                  origin_longitude: userLongitude,
-                  destination_latitude: destinationLatitude,
-                  destination_longitude: destinationLongitude,
-                  ride_time: rideTime.toFixed(0),
-                  fare_price: parseInt(amount) * 100,
-                  payment_status: "paid",
-                  driver_id: driverId,
-                  user_id: userId,
-                }),
-              });
-
-              intentCreationCallback({
-                clientSecret: result.client_secret,
-              });
-            }
-          }
-        },
-      },
-      returnURL: "myapp://book-ride",
-    });
-
-    if (!error) {
-      // setLoading(true);
+      // Notify driver about payment confirmation
+      await fetchAPI(`/(api)/ride/${rideId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_confirmed: true,
+          payment_method: selectedMethod,
+        }),
+      });
+    } catch (error: any) {
+      console.error("Payment error:", error);
+      Alert.alert(
+        "Payment Failed",
+        error.message || "Failed to process payment. Please try again."
+      );
+    } finally {
+      setProcessing(false);
     }
   };
 
   return (
-    <>
-      <CustomButton
-        title="Confirm Ride"
-        className="my-10"
-        onPress={openPaymentSheet}
-      />
+    <View className="flex flex-col w-full mt-10">
+      <Text className="text-xl font-JakartaSemiBold mb-5">
+        Select Payment Method
+      </Text>
 
-      <ReactNativeModal
-        isVisible={success}
-        onBackdropPress={() => setSuccess(false)}
-      >
-        <View className="flex flex-col items-center justify-center bg-white p-7 rounded-2xl">
-          <Image source={images.check} className="w-28 h-28 mt-5" />
+      <View className="flex flex-col space-y-3 mb-8">
+        {paymentMethods.map((method) => (
+          <TouchableOpacity
+            key={method.id}
+            onPress={() => setSelectedMethod(method.id)}
+            className={`flex flex-row items-center justify-between p-4 rounded-xl border-2 ${
+              selectedMethod === method.id
+                ? "border-general-400 bg-general-500"
+                : "border-gray-200 bg-white"
+            }`}
+          >
+            <View className="flex flex-row items-center">
+              <Text className="text-lg font-JakartaMedium ml-3">
+                {method.name}
+              </Text>
+            </View>
 
-          <Text className="text-2xl text-center font-JakartaBold mt-5">
-            Booking placed successfully
-          </Text>
+            <View
+              className={`w-6 h-6 rounded-full border-2 ${
+                selectedMethod === method.id
+                  ? "bg-general-400 border-general-400"
+                  : "border-gray-300"
+              }`}
+            />
+          </TouchableOpacity>
+        ))}
+      </View>
 
-          <Text className="text-md text-general-200 font-JakartaRegular text-center mt-3">
-            Thank you for your booking. Your reservation has been successfully
-            placed. Please proceed with your trip.
-          </Text>
-
-          <CustomButton
-            title="Back Home"
-            onPress={() => {
-              setSuccess(false);
-              router.push("/(root)/(tabs)/home");
-            }}
-            className="mt-5"
-          />
+      {/* Payment Summary */}
+      <View className="bg-general-500 rounded-lg p-4 mb-6">
+        <Text className="font-JakartaSemiBold text-lg mb-2">
+          Payment Summary
+        </Text>
+        <View className="flex-row justify-between">
+          <Text className="text-gray-600">Ride Amount:</Text>
+          <Text className="font-JakartaSemiBold">${amount}</Text>
         </View>
-      </ReactNativeModal>
-    </>
+        <View className="flex-row justify-between mt-1">
+          <Text className="text-gray-600">Payment Method:</Text>
+          <Text className="font-JakartaSemiBold">
+            {selectedMethod
+              ? paymentMethods.find((m) => m.id === selectedMethod)?.name
+              : "Not selected"}
+          </Text>
+        </View>
+      </View>
+
+      <CustomButton
+        title={processing ? "Processing..." : "Confirm Payment"}
+        onPress={handlePayment}
+        disabled={processing || !selectedMethod}
+      />
+    </View>
   );
 };
 

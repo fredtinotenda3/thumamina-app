@@ -58,6 +58,16 @@ declare interface Ride {
   };
 }
 
+declare interface RideRequest {
+  ride_id: number;
+  origin_address: string;
+  destination_address: string;
+  fare_price: number;
+  ride_time: number;
+  user_id: string;
+  status: "requested" | "accepted" | "rejected" | "in_progress" | "completed";
+}
+
 declare interface ButtonProps extends TouchableOpacityProps {
   title: string;
   bgVariant?: "primary" | "secondary" | "danger" | "outline" | "success";
@@ -135,6 +145,41 @@ declare interface DriverCardProps {
   setSelected: () => void;
 }
 
+// Add to your existing types...
+
+declare interface RideRequestData {
+  origin_address: string;
+  destination_address: string;
+  origin_latitude: number | null;
+  origin_longitude: number | null;
+  destination_latitude: number | null;
+  destination_longitude: number | null;
+  ride_time: number;
+  fare_price: number;
+  driver_id: number;
+  user_id: string;
+}
+
+declare interface PaymentData {
+  payment_status: string;
+  payment_method?: string;
+  payment_intent_id?: string;
+}
+
+declare interface RideStatus {
+  ride_id: number;
+  status: string;
+  payment_status: string;
+}
+
+declare interface PaymentProps {
+  fullName: string;
+  email: string;
+  amount: string;
+  driverId: number;
+  rideTime: number;
+  rideId: number;
+}
 export type {
   ButtonProps,
   Driver,
@@ -145,6 +190,10 @@ export type {
   LocationStore,
   MapProps,
   MarkerData,
+  PaymentData,
   PaymentProps,
   Ride,
+  RideRequest,
+  RideRequestData,
+  RideStatus,
 };

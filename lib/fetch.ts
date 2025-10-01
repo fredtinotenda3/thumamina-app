@@ -2,13 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 
 export const fetchAPI = async (url: string, options?: RequestInit) => {
   try {
+    console.log(`🌐 API Call: ${url}`, options?.method || "GET");
+
     const response = await fetch(url, options);
     if (!response.ok) {
+      console.error(
+        `❌ API Error [${url}]: ${response.status} ${response.statusText}`
+      );
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    return await response.json();
+
+    const data = await response.json();
+    console.log(`✅ API Success [${url}]:`, data);
+    return data;
   } catch (error) {
-    console.error("Fetch error:", error);
+    console.error(`💥 Fetch error [${url}]:`, error);
     throw error;
   }
 };
@@ -26,13 +34,12 @@ export const useFetch = <T>(url: string, options?: RequestInit) => {
       const result = await fetchAPI(url, options);
 
       // Handle both response formats for backward compatibility
-      // If API returns { data: ... } use result.data, otherwise use result directly
       const responseData = result.data !== undefined ? result.data : result;
 
       setData(responseData);
     } catch (err) {
       setError((err as Error).message);
-      setData(null); // Ensure data is null on error
+      setData(null);
     } finally {
       setLoading(false);
     }

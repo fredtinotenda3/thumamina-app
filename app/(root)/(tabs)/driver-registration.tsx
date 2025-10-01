@@ -3,6 +3,7 @@ import * as Location from "expo-location";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   ScrollView,
@@ -27,6 +28,16 @@ interface DriverData {
   latitude: number | null;
   longitude: number | null;
   rating: number;
+}
+
+interface RideRequest {
+  ride_id: number;
+  origin_address: string;
+  destination_address: string;
+  fare_price: number;
+  ride_time: number;
+  user_id: string;
+  status: string;
 }
 
 // Safe coordinate formatter
@@ -61,10 +72,27 @@ const DriverRegistration = () => {
   const [driverData, setDriverData] = useState<DriverData | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
 
+  // Ride request states
+  const [currentRideRequest, setCurrentRideRequest] =
+    useState<RideRequest | null>(null);
+  const [rideRequests, setRideRequests] = useState<RideRequest[]>([]);
+  const [processingRide, setProcessingRide] = useState(false);
+
   // Check if driver already exists on component mount
   useEffect(() => {
     checkDriverExistence();
   }, []);
+
+  // Check for ride requests when online
+  useEffect(() => {
+    if (!isOnline || !driverData?.id) return;
+
+    const interval = setInterval(() => {
+      checkForRideRequests();
+    }, 10000); // Check every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [isOnline, driverData?.id]);
 
   // Get current location
   const getCurrentLocation = async () => {
@@ -132,6 +160,11 @@ const DriverRegistration = () => {
           // Otherwise get current location
           await getCurrentLocation();
         }
+
+        // Load existing ride requests
+        if (response.driver.is_online) {
+          checkForRideRequests();
+        }
       } else {
         // Not registered, get location for registration
         await getCurrentLocation();
@@ -142,6 +175,35 @@ const DriverRegistration = () => {
       await getCurrentLocation();
     } finally {
       setCheckingDriver(false);
+    }
+  };
+
+  // Check for ride requests
+  const checkForRideRequests = async () => {
+    if (!driverData?.id) return;
+
+    try {
+      const response = await fetchAPI(
+        `/(api)/driver/rides?driver_id=${driverData.id}`
+      );
+
+      if (response.data && response.data.length > 0) {
+        const pendingRides = response.data.filter(
+          (ride: RideRequest) => ride.status === "requested"
+        );
+
+        setRideRequests(pendingRides);
+
+        // Show the first pending ride if we don't have a current one
+        if (pendingRides.length > 0 && !currentRideRequest) {
+          setCurrentRideRequest(pendingRides[0]);
+        }
+      } else {
+        setRideRequests([]);
+        setCurrentRideRequest(null);
+      }
+    } catch (error) {
+      console.error("Error checking ride requests:", error);
     }
   };
 
@@ -203,12 +265,6 @@ const DriverRegistration = () => {
     const newOnlineStatus = !isOnline;
 
     try {
-      console.log("Toggling online status:", {
-        driverId: driverData.id,
-        newOnlineStatus,
-        location,
-      });
-
       const response = await fetchAPI("/(api)/driver/location", {
         method: "PUT",
         headers: {
@@ -222,16 +278,22 @@ const DriverRegistration = () => {
         }),
       });
 
-      console.log("API Response:", response);
-
       if (response.data) {
         setIsOnline(newOnlineStatus);
-        // Update driver data with new online status
         setDriverData({ ...driverData, is_online: newOnlineStatus });
         Alert.alert(
           "Success",
           `You are now ${newOnlineStatus ? "online" : "offline"}`
         );
+
+        // If going online, check for ride requests
+        if (newOnlineStatus) {
+          checkForRideRequests();
+        } else {
+          // If going offline, clear ride requests
+          setRideRequests([]);
+          setCurrentRideRequest(null);
+        }
       } else {
         throw new Error("No data in response");
       }
@@ -279,6 +341,58 @@ const DriverRegistration = () => {
     }
   };
 
+  const handleAcceptRide = async (rideId: number) => {
+    if (!rideId) return;
+
+    setProcessingRide(true);
+    try {
+      const response = await fetchAPI(`/(api)/ride/${rideId}/accept`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accepted: true }),
+      });
+
+      if (response.data) {
+        Alert.alert("Success", "Ride accepted! Get ready for pickup.");
+        // Remove from current requests
+        setRideRequests((prev) =>
+          prev.filter((ride) => ride.ride_id !== rideId)
+        );
+        setCurrentRideRequest(null);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to accept ride");
+    } finally {
+      setProcessingRide(false);
+    }
+  };
+
+  const handleRejectRide = async (rideId: number) => {
+    if (!rideId) return;
+
+    setProcessingRide(true);
+    try {
+      const response = await fetchAPI(`/(api)/ride/${rideId}/accept`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accepted: false }),
+      });
+
+      if (response.data) {
+        Alert.alert("Ride Rejected", "The rider has been notified.");
+        // Remove from current requests
+        setRideRequests((prev) =>
+          prev.filter((ride) => ride.ride_id !== rideId)
+        );
+        setCurrentRideRequest(null);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to reject ride");
+    } finally {
+      setProcessingRide(false);
+    }
+  };
+
   // Safe location display
   const renderLocationInfo = () => {
     if (!location) {
@@ -297,11 +411,94 @@ const DriverRegistration = () => {
     );
   };
 
+  // Render ride request section
+  const renderRideRequests = () => {
+    if (!isOnline) {
+      return (
+        <View className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
+          <Text className="text-yellow-800 text-center">
+            Go online to receive ride requests
+          </Text>
+        </View>
+      );
+    }
+
+    if (rideRequests.length === 0) {
+      return (
+        <View className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-4">
+          <Text className="text-gray-600 text-center">
+            No ride requests available
+          </Text>
+          <Text className="text-gray-500 text-center text-sm mt-1">
+            You will receive notifications here when riders request your service
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View className="mt-4">
+        <Text className="text-lg font-JakartaSemiBold mb-3">
+          Active Ride Requests ({rideRequests.length})
+        </Text>
+
+        {rideRequests.map((ride, index) => (
+          <View
+            key={ride.ride_id}
+            className="bg-white border border-general-300 rounded-lg p-4 mb-3 shadow-sm"
+          >
+            <View className="flex-row justify-between items-start mb-3">
+              <Text className="font-JakartaSemiBold text-lg">
+                Ride Request #{index + 1}
+              </Text>
+              <Text className="text-green-600 font-JakartaSemiBold">
+                ${(ride.fare_price / 100).toFixed(2)}
+              </Text>
+            </View>
+
+            <View className="mb-3">
+              <Text className="font-JakartaMedium text-gray-700">From:</Text>
+              <Text className="text-gray-600 ml-2">{ride.origin_address}</Text>
+
+              <Text className="font-JakartaMedium text-gray-700 mt-2">To:</Text>
+              <Text className="text-gray-600 ml-2">
+                {ride.destination_address}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between mb-4">
+              <Text className="text-gray-600">Time: {ride.ride_time} min</Text>
+              <Text className="text-gray-600">Rider ID: {ride.user_id}</Text>
+            </View>
+
+            <View className="flex-row space-x-3">
+              <CustomButton
+                title="Reject"
+                onPress={() => handleRejectRide(ride.ride_id)}
+                bgVariant="danger"
+                className="flex-1"
+                disabled={processingRide}
+              />
+              <CustomButton
+                title="Accept"
+                onPress={() => handleAcceptRide(ride.ride_id)}
+                bgVariant="success"
+                className="flex-1"
+                disabled={processingRide}
+              />
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   // Show loading while checking driver existence
   if (checkingDriver) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <Text className="text-lg font-JakartaSemiBold">
+        <ActivityIndicator size="large" />
+        <Text className="text-lg font-JakartaSemiBold mt-3">
           Checking driver status...
         </Text>
       </SafeAreaView>
@@ -512,6 +709,9 @@ const DriverRegistration = () => {
                   )}
                 </View>
               </View>
+
+              {/* Ride Requests Section - Below the Map */}
+              {renderRideRequests()}
 
               <TouchableOpacity
                 onPress={getCurrentLocation}

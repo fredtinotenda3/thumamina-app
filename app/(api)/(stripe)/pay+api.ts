@@ -1,40 +1,43 @@
-import { Stripe } from "stripe";
+import { neon } from "@neondatabase/serverless";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
-export async function POST(request: Request) {
+export async function PUT(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
+    const rideId = params.id;
     const body = await request.json();
-    const { payment_method_id, payment_intent_id, customer_id, client_secret } =
-      body;
+    const { payment_status, payment_intent_id } = body;
 
-    if (!payment_method_id || !payment_intent_id || !customer_id) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
-        { status: 400 },
+    if (!payment_status) {
+      return Response.json(
+        { error: "Payment status required" },
+        { status: 400 }
       );
     }
 
-    const paymentMethod = await stripe.paymentMethods.attach(
-      payment_method_id,
-      { customer: customer_id },
-    );
+    const sql = neon(`${process.env.DATABASE_URL}`);
 
-    const result = await stripe.paymentIntents.confirm(payment_intent_id, {
-      payment_method: paymentMethod.id,
-    });
+    const response = await sql`
+      UPDATE rides 
+      SET 
+        payment_status = ${payment_status},
+        ${payment_intent_id ? sql`payment_intent_id = ${payment_intent_id},` : sql``}
+        updated_at = CURRENT_TIMESTAMP
+      WHERE ride_id = ${rideId}
+      RETURNING *;
+    `;
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: "Payment successful",
-        result: result,
-      }),
-    );
-  } catch (error) {
-    console.error("Error paying:", error);
-    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
-      status: 500,
+    if (response.length === 0) {
+      return Response.json({ error: "Ride not found" }, { status: 404 });
+    }
+
+    return Response.json({
+      data: response[0],
+      message: "Payment status updated successfully",
     });
+  } catch (error: any) {
+    console.error("Error updating payment status:", error);
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
