@@ -1,3 +1,5 @@
+// app/(api)/stripe/pay+api.ts
+
 import { neon } from "@neondatabase/serverless";
 
 export async function PUT(
@@ -16,6 +18,12 @@ export async function PUT(
       );
     }
 
+    // Convert rideId to number
+    const rideIdNum = Number(rideId);
+    if (isNaN(rideIdNum)) {
+      return Response.json({ error: "Invalid ride ID" }, { status: 400 });
+    }
+
     const sql = neon(`${process.env.DATABASE_URL}`);
 
     const response = await sql`
@@ -24,7 +32,7 @@ export async function PUT(
         payment_status = ${payment_status},
         ${payment_intent_id ? sql`payment_intent_id = ${payment_intent_id},` : sql``}
         updated_at = CURRENT_TIMESTAMP
-      WHERE ride_id = ${rideId}
+      WHERE ride_id = ${rideIdNum}  -- Use converted number
       RETURNING *;
     `;
 
