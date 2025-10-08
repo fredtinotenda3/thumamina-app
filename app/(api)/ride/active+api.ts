@@ -34,7 +34,9 @@ export async function GET(request: Request) {
         FROM rides r
         LEFT JOIN drivers d ON r.driver_id = d.id
         WHERE r.user_id = ${user_id} 
-          AND r.status IN ('requested', 'accepted', 'started')
+          AND r.status IN ('accepted', 'started', 'completed')
+          AND r.payment_status IS NOT NULL
+          AND r.payment_status != 'pending'
         ORDER BY r.created_at DESC
         LIMIT 1
       `;
@@ -50,7 +52,8 @@ export async function GET(request: Request) {
         FROM rides r
         LEFT JOIN users u ON r.user_id = u.id
         WHERE r.driver_id = ${driver_id} 
-          AND r.status IN ('requested', 'accepted', 'started')
+          AND r.status IN ('accepted', 'started', 'completed')
+          AND r.payment_status IS NOT NULL
         ORDER BY r.created_at DESC
         LIMIT 1
       `;
