@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Alert, Text, TouchableOpacity, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 import { icons } from "@/constants";
 import { fetchAPI } from "@/lib/fetch";
@@ -28,7 +36,6 @@ const Payment = ({
   const [processing, setProcessing] = useState(false);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
-  // Validate all required props
   const isValidProps = rideId && driverId && amount && fullName && email;
 
   if (!isValidProps) {
@@ -74,17 +81,8 @@ const Payment = ({
     setProcessing(true);
 
     try {
-      // SHORTENED FORMAT: "ECOCASH_83.71" instead of "ECOCASH_CONFIRMED_$83.71"
       const paymentStatusValue = `${selectedMethod.toUpperCase()}_${amount}`;
 
-      console.log("💳 Processing payment confirmation:", {
-        rideId,
-        paymentMethod: selectedMethod,
-        amount,
-        paymentStatusValue,
-      });
-
-      // Update ride with payment method and amount in existing payment_status column
       const paymentResponse = await fetchAPI(`/(api)/ride/${rideId}/payment`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -100,15 +98,9 @@ const Payment = ({
         );
       }
 
-      console.log("✅ Payment recorded successfully:", paymentResponse.data);
-
-      // Update local state
       setPaymentConfirmed(true);
-
-      // Notify parent component about successful payment confirmation
       onPaymentConfirmed?.(selectedMethod, amount);
 
-      // Show success confirmation with driver on the way message
       Alert.alert(
         "Payment Confirmed! 🎉",
         `Your ${selectedMethod} payment of $${amount} has been confirmed. Your driver is on the way and will arrive shortly.`,
@@ -122,9 +114,7 @@ const Payment = ({
         ]
       );
 
-      // Optional: Notify driver about payment confirmation
       try {
-        // FIXED: Use the correct endpoint format
         await fetchAPI(`/(api)/ride/status`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -134,7 +124,6 @@ const Payment = ({
             payment_method: selectedMethod,
           }),
         });
-        console.log("✅ Driver notified about payment confirmation");
       } catch (notificationError) {
         console.warn(
           "⚠️ Could not notify driver, but payment was recorded:",
@@ -160,10 +149,9 @@ const Payment = ({
     }
   };
 
-  // If payment is already confirmed, show success state
   if (paymentConfirmed) {
     return (
-      <View className="flex flex-col w-full mt-10 items-center justify-center">
+      <View className="flex flex-col w-full mt-10 items-center justify-center px-4">
         <View className="bg-green-50 border border-green-200 rounded-2xl p-6 w-full">
           <Text className="text-2xl font-JakartaBold text-green-600 text-center mb-3">
             Payment Confirmed! ✅
@@ -196,85 +184,105 @@ const Payment = ({
   }
 
   return (
-    <View className="flex flex-col w-full mt-10">
-      <Text className="text-xl font-JakartaSemiBold mb-5">
-        Select Payment Method
-      </Text>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+      className="flex-1"
+    >
+      <ScrollView
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingBottom: 100,
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View className="flex flex-col w-full mt-10 px-4">
+          <Text className="text-xl font-JakartaSemiBold mb-5">
+            Select Payment Method
+          </Text>
 
-      <View className="flex flex-col space-y-3 mb-8">
-        {paymentMethods.map((method) => (
-          <TouchableOpacity
-            key={method.id}
-            onPress={() => setSelectedMethod(method.id)}
-            className={`flex flex-row items-center justify-between p-4 rounded-xl border-2 ${
-              selectedMethod === method.id
-                ? "border-general-400 bg-general-500"
-                : "border-gray-200 bg-white"
-            }`}
-          >
-            <View className="flex flex-col flex-1">
-              <View className="flex flex-row items-center">
-                <Text className="text-lg font-JakartaMedium ml-3">
-                  {method.name}
-                </Text>
-              </View>
-              <Text className="text-gray-500 text-sm mt-1 ml-3">
-                {method.description}
+          <View className="flex flex-col space-y-3 mb-8">
+            {paymentMethods.map((method) => (
+              <TouchableOpacity
+                key={method.id}
+                onPress={() => setSelectedMethod(method.id)}
+                className={`flex flex-row items-center justify-between p-4 rounded-xl border-2 ${
+                  selectedMethod === method.id
+                    ? "border-general-400 bg-general-500"
+                    : "border-gray-200 bg-white"
+                }`}
+              >
+                <View className="flex flex-col flex-1">
+                  <View className="flex flex-row items-center">
+                    <Text className="text-lg font-JakartaMedium ml-3">
+                      {method.name}
+                    </Text>
+                  </View>
+                  <Text className="text-gray-500 text-sm mt-1 ml-3">
+                    {method.description}
+                  </Text>
+                </View>
+
+                <View
+                  className={`w-6 h-6 rounded-full border-2 ${
+                    selectedMethod === method.id
+                      ? "bg-general-400 border-general-400"
+                      : "border-gray-300"
+                  }`}
+                />
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View className="bg-general-500 rounded-lg p-4 mb-6">
+            <Text className="font-JakartaSemiBold text-lg mb-2">
+              Payment Summary
+            </Text>
+            <View className="flex-row justify-between mb-2">
+              <Text className="text-gray-600">Ride Amount:</Text>
+              <Text className="font-JakartaSemiBold text-green-600">
+                ${amount}
               </Text>
             </View>
+            <View className="flex-row justify-between mb-2">
+              <Text className="text-gray-600">Payment Method:</Text>
+              <Text className="font-JakartaSemiBold">
+                {selectedMethod
+                  ? paymentMethods.find((m) => m.id === selectedMethod)?.name
+                  : "Not selected"}
+              </Text>
+            </View>
+            <View className="border-t border-gray-300 mt-2 pt-2">
+              <Text className="text-gray-500 text-sm">
+                This amount will be recorded with your selected payment method.
+              </Text>
+            </View>
+          </View>
 
-            <View
-              className={`w-6 h-6 rounded-full border-2 ${
-                selectedMethod === method.id
-                  ? "bg-general-400 border-general-400"
-                  : "border-gray-300"
-              }`}
-            />
-          </TouchableOpacity>
-        ))}
-      </View>
+          <CustomButton
+            title={
+              processing
+                ? "Confirming Payment..."
+                : `Confirm ${
+                    selectedMethod
+                      ? paymentMethods.find((m) => m.id === selectedMethod)
+                          ?.name
+                      : ""
+                  } Payment`
+            }
+            onPress={handlePaymentConfirmation}
+            disabled={processing || !selectedMethod}
+            bgVariant="success"
+          />
 
-      {/* Payment Summary */}
-      <View className="bg-general-500 rounded-lg p-4 mb-6">
-        <Text className="font-JakartaSemiBold text-lg mb-2">
-          Payment Summary
-        </Text>
-        <View className="flex-row justify-between mb-2">
-          <Text className="text-gray-600">Ride Amount:</Text>
-          <Text className="font-JakartaSemiBold text-green-600">${amount}</Text>
+          {processing && (
+            <Text className="text-center text-gray-500 mt-3 text-sm">
+              Securing your payment method and notifying driver...
+            </Text>
+          )}
         </View>
-        <View className="flex-row justify-between mb-2">
-          <Text className="text-gray-600">Payment Method:</Text>
-          <Text className="font-JakartaSemiBold">
-            {selectedMethod
-              ? paymentMethods.find((m) => m.id === selectedMethod)?.name
-              : "Not selected"}
-          </Text>
-        </View>
-        <View className="border-t border-gray-300 mt-2 pt-2">
-          <Text className="text-gray-500 text-sm">
-            This amount will be recorded with your selected payment method.
-          </Text>
-        </View>
-      </View>
-
-      <CustomButton
-        title={
-          processing
-            ? "Confirming Payment..."
-            : `Confirm ${selectedMethod ? paymentMethods.find((m) => m.id === selectedMethod)?.name : ""} Payment`
-        }
-        onPress={handlePaymentConfirmation}
-        disabled={processing || !selectedMethod}
-        bgVariant="success"
-      />
-
-      {processing && (
-        <Text className="text-center text-gray-500 mt-3 text-sm">
-          Securing your payment method and notifying driver...
-        </Text>
-      )}
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 

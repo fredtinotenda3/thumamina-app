@@ -511,9 +511,9 @@ const DriverRegistration = () => {
 
               <View className="bg-general-500 rounded-lg p-4 mb-6">
                 <Text className="font-JakartaSemiBold text-lg mb-2">
-                  Vehicle Information
+                  Bike Information
                 </Text>
-                <Text>Seats: {form.car_seats}</Text>
+                {/* <Text>Seats: {form.car_seats}</Text> */}
                 {renderLocationInfo()}
               </View>
 

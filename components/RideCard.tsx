@@ -52,14 +52,14 @@ const RideCard = ({ ride }: { ride: Ride }) => {
             </Text>
           </View>
 
-          <View className="flex flex-row items-center w-full justify-between mb-5">
+          {/* <View className="flex flex-row items-center w-full justify-between mb-5">
             <Text className="text-md font-JakartaMedium text-gray-500">
               Car Seats
             </Text>
             <Text className="text-md font-JakartaBold">
               {ride.driver.car_seats}
             </Text>
-          </View>
+          </View> */}
 
           <View className="flex flex-row items-center w-full justify-between">
             <Text className="text-md font-JakartaMedium text-gray-500">
