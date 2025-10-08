@@ -1,4 +1,3 @@
-// types/type.ts
 import { TextInputProps, TouchableOpacityProps } from "react-native";
 
 declare interface Driver {
@@ -110,6 +109,7 @@ declare interface PaymentProps {
   amount: string;
   driverId: number;
   rideTime: number;
+  rideId: number;
 }
 
 declare interface LocationStore {
@@ -172,6 +172,13 @@ declare interface RideStatus {
   payment_status: string;
 }
 
+declare interface PaymentDetails {
+  method: "cash" | "ecocash" | "card" | "unknown";
+  amount: string;
+  status: "confirmed" | "pending" | "failed";
+  rawStatus: string;
+}
+
 declare interface PaymentProps {
   fullName: string;
   email: string;
@@ -179,7 +186,25 @@ declare interface PaymentProps {
   driverId: number;
   rideTime: number;
   rideId: number;
+  onPaymentConfirmed?: (paymentMethod: string, amount: string) => void;
 }
+
+declare interface RideNotificationProps {
+  driverId: number;
+  isOnline: boolean;
+  onRideAccepted?: (rideId: number) => void;
+  onRideRejected?: (rideId: number) => void;
+}
+
+declare interface UserNotificationProps {
+  rideId: number;
+  userId: string;
+  onPaymentNavigate: (rideId: number) => void;
+  onSelectAnotherDriver: () => void;
+  pollingInterval?: number;
+  maxPolls?: number;
+}
+
 export type {
   ButtonProps,
   Driver,
@@ -193,7 +218,9 @@ export type {
   PaymentData,
   PaymentProps,
   Ride,
+  RideNotificationProps,
   RideRequest,
   RideRequestData,
   RideStatus,
+  UserNotificationProps,
 };

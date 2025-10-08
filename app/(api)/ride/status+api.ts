@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
     const sql = neon(`${process.env.DATABASE_URL}`);
 
-    // CRITICAL FIX: Convert ride_id to number
+    // Convert ride_id to number
     const rideIdNum = Number(ride_id);
 
     if (isNaN(rideIdNum)) {
@@ -24,7 +24,10 @@ export async function GET(request: Request) {
         status,
         payment_status,
         driver_id,
-        user_id
+        user_id,
+        accepted_at,
+        rejected_at,
+        created_at
       FROM rides 
       WHERE ride_id = ${rideIdNum}
     `;
@@ -46,8 +49,43 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { ride_id, status, driver_id } = body;
+    const { ride_id, status, driver_id, payment_confirmed, payment_method } =
+      body;
 
+    // Handle payment confirmation without requiring driver_id
+    if (payment_confirmed) {
+      if (!ride_id) {
+        return Response.json(
+          { error: "ride_id is required for payment confirmation" },
+          { status: 400 }
+        );
+      }
+
+      const sql = neon(`${process.env.DATABASE_URL}`);
+      const rideIdNum = Number(ride_id);
+
+      if (isNaN(rideIdNum)) {
+        return Response.json({ error: "Invalid ride_id" }, { status: 400 });
+      }
+
+      // FIXED: Remove updated_at
+      const response = await sql`
+        UPDATE rides 
+        SET 
+          status = ${status || "confirmed"},
+          payment_status = ${payment_method ? `${payment_method.toUpperCase()}_CONFIRMED` : "confirmed"}
+        WHERE ride_id = ${rideIdNum}
+        RETURNING *;
+      `;
+
+      if (response.length === 0) {
+        return Response.json({ error: "Ride not found" }, { status: 404 });
+      }
+
+      return Response.json({ data: response[0] });
+    }
+
+    // Original status update logic (for driver actions)
     if (!ride_id || !status || !driver_id) {
       return Response.json(
         { error: "Missing required fields: ride_id, status, driver_id" },
@@ -68,7 +106,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    // FIX: Handle different status updates properly
+    // Handle different status updates properly
     let response;
     switch (status) {
       case "accepted":
@@ -76,8 +114,7 @@ export async function PUT(request: Request) {
           UPDATE rides 
           SET 
             status = ${status},
-            accepted_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
+            accepted_at = CURRENT_TIMESTAMP
           WHERE ride_id = ${rideIdNum} 
             AND driver_id = ${driverIdNum}
           RETURNING *;
@@ -88,8 +125,7 @@ export async function PUT(request: Request) {
           UPDATE rides 
           SET 
             status = ${status},
-            rejected_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
+            rejected_at = CURRENT_TIMESTAMP
           WHERE ride_id = ${rideIdNum} 
             AND driver_id = ${driverIdNum}
           RETURNING *;
@@ -100,8 +136,7 @@ export async function PUT(request: Request) {
           UPDATE rides 
           SET 
             status = ${status},
-            started_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
+            started_at = CURRENT_TIMESTAMP
           WHERE ride_id = ${rideIdNum} 
             AND driver_id = ${driverIdNum}
           RETURNING *;
@@ -112,8 +147,7 @@ export async function PUT(request: Request) {
           UPDATE rides 
           SET 
             status = ${status},
-            completed_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
+            completed_at = CURRENT_TIMESTAMP
           WHERE ride_id = ${rideIdNum} 
             AND driver_id = ${driverIdNum}
           RETURNING *;

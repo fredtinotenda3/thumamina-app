@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Image, Text, View } from "react-native";
 import CustomButton from "@/components/CustomButton";
 import Payment from "@/components/Payment";
 import RideLayout from "@/components/RideLayout";
+import UserNotification from "@/components/UserNotification";
 import { icons } from "@/constants";
 import { fetchAPI } from "@/lib/fetch";
 import { formatTime } from "@/lib/utils";
@@ -24,11 +25,12 @@ const BookRide = () => {
   } = useLocationStore();
   const { drivers, selectedDriver } = useDriverStore();
   const [rideStatus, setRideStatus] = useState<
-    "pending" | "accepted" | "rejected"
+    "pending" | "accepted" | "rejected" | "timeout"
   >("pending");
   const [rideId, setRideId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pollCount, setPollCount] = useState(0);
 
   const driverDetails = drivers?.find(
     (driver) => +driver.id === selectedDriver
@@ -36,7 +38,7 @@ const BookRide = () => {
 
   // Create ride request when component mounts
   useEffect(() => {
-    if (selectedDriver && user?.id) {
+    if (selectedDriver && user?.id && !rideId) {
       createRideRequest();
     }
   }, [selectedDriver, user?.id]);
@@ -49,11 +51,11 @@ const BookRide = () => {
 
     setLoading(true);
     setError(null);
+    setPollCount(0);
 
     try {
       console.log("🚗 Creating ride request for driver:", selectedDriver);
 
-      // FIXED: Remove the * 100 from fare_price and ensure all coordinates are numbers
       const rideData = {
         origin_address: userAddress || "Current Location",
         destination_address: destinationAddress || "Destination",
@@ -62,14 +64,13 @@ const BookRide = () => {
         destination_latitude: Number(destinationLatitude) || -17.82927,
         destination_longitude: Number(destinationLongitude) || 31.03766,
         ride_time: driverDetails?.time || 15,
-        fare_price: parseFloat(driverDetails?.price || "5.00"), // REMOVED * 100
+        fare_price: parseFloat(driverDetails?.price || "5.00"),
         driver_id: selectedDriver,
         user_id: user.id,
       };
 
       console.log("📦 Sending ride data:", rideData);
 
-      // FIXED: Use the correct endpoint and better error handling
       const response = await fetchAPI("/(api)/ride/create-ride", {
         method: "POST",
         headers: {
@@ -100,18 +101,20 @@ const BookRide = () => {
   };
 
   const pollRideStatus = async (rideId: number) => {
-    let pollCount = 0;
-    const maxPolls = 40;
+    let currentPollCount = 0;
+    const maxPolls = 30; // 1.5 minutes at 3-second intervals
 
-    const interval = setInterval(async () => {
+    const pollInterval = setInterval(async () => {
       try {
-        pollCount++;
+        currentPollCount++;
+        setPollCount(currentPollCount);
+
         console.log(
-          `🔄 Polling ride status (attempt ${pollCount}) for ride:`,
+          `🔄 Polling ride status (attempt ${currentPollCount}) for ride:`,
           rideId
         );
 
-        // FIXED: Use the correct endpoint format for dynamic routes
+        // FIXED: Use the correct endpoint with query parameter
         const response = await fetchAPI(`/(api)/ride/status?ride_id=${rideId}`);
 
         console.log("📊 Status response:", response);
@@ -122,45 +125,56 @@ const BookRide = () => {
 
           if (status === "accepted") {
             setRideStatus("accepted");
-            clearInterval(interval);
+            clearInterval(pollInterval);
             setLoading(false);
             console.log("✅ Ride accepted! Proceeding to payment...");
           } else if (status === "rejected") {
             setRideStatus("rejected");
-            clearInterval(interval);
+            clearInterval(pollInterval);
             setLoading(false);
-            Alert.alert(
-              "Ride Rejected",
-              "The driver rejected your ride request. Please choose another driver."
-            );
           }
           // If status is 'requested', continue polling
         } else if (response.error) {
           console.error("❌ Error in status response:", response.error);
         }
+
+        // Stop polling after max attempts
+        if (currentPollCount >= maxPolls) {
+          clearInterval(pollInterval);
+          setRideStatus("timeout");
+          setLoading(false);
+        }
       } catch (error) {
         console.error("❌ Error polling ride status:", error);
 
-        // Only stop after multiple consecutive errors
-        if (pollCount > 15) {
-          clearInterval(interval);
+        // Stop after multiple consecutive errors
+        if (currentPollCount > 10) {
+          clearInterval(pollInterval);
           setLoading(false);
-          Alert.alert("Error", "Unable to get ride status. Please try again.");
         }
       }
-    }, 3000);
+    }, 3000); // Poll every 3 seconds
 
-    // Clear interval after 2 minutes (timeout)
-    setTimeout(() => {
-      clearInterval(interval);
-      if (rideStatus === "pending") {
-        setLoading(false);
-        Alert.alert(
-          "Timeout",
-          "Driver did not respond in time. Please try another driver."
-        );
-      }
-    }, 120000);
+    // Cleanup on unmount
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  };
+
+  const handlePaymentNavigate = (rideId: number) => {
+    // The payment section will be shown automatically when ride is accepted
+    console.log("Proceeding to payment for ride:", rideId);
+    setRideStatus("accepted");
+  };
+
+  const handleSelectAnotherDriver = () => {
+    router.back(); // Go back to driver selection
+  };
+
+  const handlePaymentConfirmed = (paymentMethod: string, amount: string) => {
+    console.log(`💰 Payment confirmed: ${paymentMethod} - $${amount}`);
+    // You can add additional logic here, like updating local state
+    // or triggering notifications to the driver
   };
 
   // Debug info
@@ -170,6 +184,7 @@ const BookRide = () => {
     rideStatus,
     loading,
     error,
+    pollCount,
     driverDetails,
     hasUser: !!user?.id,
   });
@@ -188,37 +203,35 @@ const BookRide = () => {
     );
   }
 
-  if (loading || rideStatus === "pending") {
-    return (
-      <RideLayout title="Waiting for Driver">
-        <View className="flex-1 justify-center items-center px-5">
-          <ActivityIndicator size="large" color="#0286FF" />
-          <Text className="text-lg font-JakartaSemiBold mt-4 text-center">
-            Waiting for driver to accept your ride...
-          </Text>
-          <Text className="text-gray-500 text-center mt-2">
-            {driverDetails?.first_name} {driverDetails?.last_name} has been
-            notified and will respond shortly.
-          </Text>
-          <Text className="text-gray-400 text-center mt-4 text-sm">
-            This may take a few moments... (Polling:{" "}
-            {rideId ? `Ride #${rideId}` : "Creating ride"})
-          </Text>
-        </View>
-      </RideLayout>
-    );
-  }
+  // Safe values for Payment component
+  const paymentProps = {
+    fullName: user?.fullName || "Customer",
+    email: user?.emailAddresses[0]?.emailAddress || "customer@example.com",
+    amount: driverDetails?.price || "5.00",
+    driverId: driverDetails?.id || 0,
+    rideTime: driverDetails?.time || 15,
+    rideId: rideId || 0,
+    onPaymentConfirmed: handlePaymentConfirmed,
+  };
 
-  if (rideStatus === "rejected") {
+  const canShowPayment =
+    rideId && driverDetails?.id && driverDetails?.price && driverDetails?.time;
+
+  // Show error states for rejected or timeout
+  if (rideStatus === "rejected" || rideStatus === "timeout") {
     return (
-      <RideLayout title="Ride Rejected">
+      <RideLayout title="Ride Not Available">
         <View className="flex-1 justify-center items-center px-5">
           <Text className="text-lg font-JakartaSemiBold text-red-500 mb-4">
-            Ride Request Rejected
+            {rideStatus === "rejected"
+              ? "Ride Request Rejected"
+              : "Request Timeout"}
           </Text>
           <Text className="text-gray-500 text-center mb-6">
-            The driver was unable to accept your ride. Please go back and choose
-            another driver.
+            {rideStatus === "rejected"
+              ? "The driver was unable to accept your ride."
+              : "The driver did not respond in time."}{" "}
+            Please go back and choose another driver.
           </Text>
           <CustomButton
             title="Choose Another Driver"
@@ -229,37 +242,6 @@ const BookRide = () => {
     );
   }
 
-  // Only show payment if ride was accepted and we have all required data
-  const canShowPayment =
-    rideId && driverDetails?.id && driverDetails?.price && driverDetails?.time;
-
-  if (!canShowPayment) {
-    return (
-      <RideLayout title="Error">
-        <View className="flex-1 justify-center items-center px-5">
-          <Text className="text-lg font-JakartaSemiBold text-red-500 mb-4">
-            Missing Ride Information
-          </Text>
-          <Text className="text-gray-500 text-center mb-6">
-            Unable to load payment information. Please try again.
-            {` (Ride ID: ${rideId}, Driver: ${driverDetails?.id})`}
-          </Text>
-          <CustomButton title="Go Back" onPress={() => router.back()} />
-        </View>
-      </RideLayout>
-    );
-  }
-
-  // Safe values for Payment component
-  const paymentProps = {
-    fullName: user?.fullName || "Customer",
-    email: user?.emailAddresses[0]?.emailAddress || "customer@example.com",
-    amount: driverDetails.price || "5.00",
-    driverId: driverDetails.id,
-    rideTime: driverDetails.time || 15,
-    rideId: rideId,
-  };
-
   return (
     <StripeProvider
       publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY!}
@@ -268,74 +250,117 @@ const BookRide = () => {
     >
       <RideLayout title="Book Ride">
         <>
-          <Text className="text-xl font-JakartaSemiBold mb-3">
-            Ride Information
-          </Text>
-
-          <View className="flex flex-col w-full items-center justify-center mt-10">
-            <Image
-              source={{ uri: driverDetails?.profile_image_url }}
-              className="w-28 h-28 rounded-full"
+          {/* User Notification Component */}
+          {rideId && (
+            <UserNotification
+              rideId={rideId}
+              userId={user?.id || ""}
+              onPaymentNavigate={handlePaymentNavigate}
+              onSelectAnotherDriver={handleSelectAnotherDriver}
             />
+          )}
 
-            <View className="flex flex-row items-center justify-center mt-5 space-x-2">
-              <Text className="text-lg font-JakartaSemiBold">
-                {driverDetails?.first_name} {driverDetails?.last_name}
+          {/* Show loading/status while waiting for driver response */}
+          {(loading || rideStatus === "pending") && (
+            <View className="flex-1 justify-center items-center px-5">
+              <ActivityIndicator size="large" color="#0286FF" />
+              <Text className="text-lg font-JakartaSemiBold mt-4 text-center">
+                Waiting for driver to accept your ride...
               </Text>
-
-              <View className="flex flex-row items-center space-x-0.5">
-                <Image
-                  source={icons.star}
-                  className="w-5 h-5"
-                  resizeMode="contain"
+              <Text className="text-gray-500 text-center mt-2">
+                {driverDetails?.first_name} {driverDetails?.last_name} has been
+                notified and will respond shortly.
+              </Text>
+              <Text className="text-gray-400 text-center mt-4 text-sm">
+                Polling status... (Attempt: {pollCount})
+              </Text>
+              <View className="mt-6">
+                <CustomButton
+                  title="Cancel Request"
+                  onPress={() => router.back()}
+                  bgVariant="outline"
                 />
-                <Text className="text-lg font-JakartaRegular">
-                  {driverDetails?.rating}
-                </Text>
               </View>
             </View>
-          </View>
+          )}
 
-          <View className="flex flex-col w-full items-start justify-center py-3 px-5 rounded-3xl bg-general-600 mt-5">
-            <View className="flex flex-row items-center justify-between w-full border-b border-white py-3">
-              <Text className="text-lg font-JakartaRegular">Ride Price</Text>
-              <Text className="text-lg font-JakartaRegular text-[#0CC25F]">
-                ${driverDetails?.price}
+          {/* Show payment section only when ride is accepted */}
+          {rideStatus === "accepted" && canShowPayment ? (
+            <>
+              <Text className="text-xl font-JakartaSemiBold mb-3">
+                Ride Confirmed! 🎉
               </Text>
-            </View>
 
-            <View className="flex flex-row items-center justify-between w-full border-b border-white py-3">
-              <Text className="text-lg font-JakartaRegular">Pickup Time</Text>
-              <Text className="text-lg font-JakartaRegular">
-                {formatTime(driverDetails?.time!)}
-              </Text>
-            </View>
+              <View className="flex flex-col w-full items-center justify-center mt-10">
+                <Image
+                  source={{ uri: driverDetails?.profile_image_url }}
+                  className="w-28 h-28 rounded-full"
+                />
 
-            <View className="flex flex-row items-center justify-between w-full py-3">
-              <Text className="text-lg font-JakartaRegular">Car Seats</Text>
-              <Text className="text-lg font-JakartaRegular">
-                {driverDetails?.car_seats}
-              </Text>
-            </View>
-          </View>
+                <View className="flex flex-row items-center justify-center mt-5 space-x-2">
+                  <Text className="text-lg font-JakartaSemiBold">
+                    {driverDetails?.first_name} {driverDetails?.last_name}
+                  </Text>
 
-          <View className="flex flex-col w-full items-start justify-center mt-5">
-            <View className="flex flex-row items-center justify-start mt-3 border-t border-b border-general-700 w-full py-3">
-              <Image source={icons.to} className="w-6 h-6" />
-              <Text className="text-lg font-JakartaRegular ml-2">
-                {userAddress}
-              </Text>
-            </View>
+                  <View className="flex flex-row items-center space-x-0.5">
+                    <Image
+                      source={icons.star}
+                      className="w-5 h-5"
+                      resizeMode="contain"
+                    />
+                    <Text className="text-lg font-JakartaRegular">
+                      {driverDetails?.rating}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
-            <View className="flex flex-row items-center justify-start border-b border-general-700 w-full py-3">
-              <Image source={icons.point} className="w-6 h-6" />
-              <Text className="text-lg font-JakartaRegular ml-2">
-                {destinationAddress}
-              </Text>
-            </View>
-          </View>
+              <View className="flex flex-col w-full items-start justify-center py-3 px-5 rounded-3xl bg-general-600 mt-5">
+                <View className="flex flex-row items-center justify-between w-full border-b border-white py-3">
+                  <Text className="text-lg font-JakartaRegular">
+                    Ride Price
+                  </Text>
+                  <Text className="text-lg font-JakartaRegular text-[#0CC25F]">
+                    ${driverDetails?.price}
+                  </Text>
+                </View>
 
-          <Payment {...paymentProps} />
+                <View className="flex flex-row items-center justify-between w-full border-b border-white py-3">
+                  <Text className="text-lg font-JakartaRegular">
+                    Pickup Time
+                  </Text>
+                  <Text className="text-lg font-JakartaRegular">
+                    {formatTime(driverDetails?.time!)}
+                  </Text>
+                </View>
+
+                <View className="flex flex-row items-center justify-between w-full py-3">
+                  <Text className="text-lg font-JakartaRegular">Car Seats</Text>
+                  <Text className="text-lg font-JakartaRegular">
+                    {driverDetails?.car_seats}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="flex flex-col w-full items-start justify-center mt-5">
+                <View className="flex flex-row items-center justify-start mt-3 border-t border-b border-general-700 w-full py-3">
+                  <Image source={icons.to} className="w-6 h-6" />
+                  <Text className="text-lg font-JakartaRegular ml-2">
+                    {userAddress}
+                  </Text>
+                </View>
+
+                <View className="flex flex-row items-center justify-start border-b border-general-700 w-full py-3">
+                  <Image source={icons.point} className="w-6 h-6" />
+                  <Text className="text-lg font-JakartaRegular ml-2">
+                    {destinationAddress}
+                  </Text>
+                </View>
+              </View>
+
+              <Payment {...paymentProps} />
+            </>
+          ) : null}
         </>
       </RideLayout>
     </StripeProvider>

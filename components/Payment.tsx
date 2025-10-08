@@ -12,6 +12,7 @@ interface PaymentProps {
   driverId: number;
   rideTime: number;
   rideId: number;
+  onPaymentConfirmed?: (paymentMethod: string, amount: string) => void;
 }
 
 const Payment = ({
@@ -21,9 +22,11 @@ const Payment = ({
   driverId,
   rideTime,
   rideId,
+  onPaymentConfirmed,
 }: PaymentProps) => {
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
   // Validate all required props
   const isValidProps = rideId && driverId && amount && fullName && email;
@@ -42,12 +45,27 @@ const Payment = ({
   }
 
   const paymentMethods = [
-    { id: "cash", name: "Cash", icon: icons.dollar },
-    { id: "ecocash", name: "EcoCash", icon: icons.dollar },
-    { id: "card", name: "Credit Card", icon: icons.dollar },
+    {
+      id: "cash",
+      name: "Cash",
+      icon: icons.dollar,
+      description: "Pay with cash when you meet the driver",
+    },
+    {
+      id: "ecocash",
+      name: "EcoCash",
+      icon: icons.dollar,
+      description: "Mobile money payment via EcoCash",
+    },
+    {
+      id: "card",
+      name: "Credit Card",
+      icon: icons.dollar,
+      description: "Secure card payment processed via Stripe",
+    },
   ];
 
-  const handlePayment = async () => {
+  const handlePaymentConfirmation = async () => {
     if (!selectedMethod) {
       Alert.alert("Error", "Please select a payment method");
       return;
@@ -56,73 +74,126 @@ const Payment = ({
     setProcessing(true);
 
     try {
-      // Update ride with payment method
+      // SHORTENED FORMAT: "ECOCASH_83.71" instead of "ECOCASH_CONFIRMED_$83.71"
+      const paymentStatusValue = `${selectedMethod.toUpperCase()}_${amount}`;
+
+      console.log("💳 Processing payment confirmation:", {
+        rideId,
+        paymentMethod: selectedMethod,
+        amount,
+        paymentStatusValue,
+      });
+
+      // Update ride with payment method and amount in existing payment_status column
       const paymentResponse = await fetchAPI(`/(api)/ride/${rideId}/payment`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          payment_status: "confirmed",
-          payment_method: selectedMethod,
+          payment_status: paymentStatusValue,
+          status: "confirmed",
         }),
       });
 
       if (!paymentResponse.data) {
-        throw new Error("Failed to update payment status");
+        throw new Error(
+          paymentResponse.error || "Failed to update payment status in database"
+        );
       }
 
-      // Handle different payment methods
-      let alertMessage = "";
-      let alertTitle = "";
+      console.log("✅ Payment recorded successfully:", paymentResponse.data);
 
-      switch (selectedMethod) {
-        case "cash":
-          alertTitle = "Ride Confirmed!";
-          alertMessage =
-            "Your ride has been confirmed. Please have cash ready for the driver.";
-          break;
-        case "ecocash":
-          alertTitle = "EcoCash Payment";
-          alertMessage =
-            "EcoCash payment will be processed when you start your ride.";
-          break;
-        case "card":
-          alertTitle = "Card Payment";
-          alertMessage = "Card payment will be processed securely.";
-          break;
-        default:
-          alertTitle = "Payment Confirmed";
-          alertMessage = "Your payment has been confirmed.";
-      }
+      // Update local state
+      setPaymentConfirmed(true);
 
-      Alert.alert(alertTitle, alertMessage, [
-        {
-          text: "OK",
-          onPress: () => {
-            console.log("Payment confirmed for ride:", rideId);
-            // Optionally navigate to ride tracking screen
-          },
-        },
-      ]);
+      // Notify parent component about successful payment confirmation
+      onPaymentConfirmed?.(selectedMethod, amount);
 
-      // Notify driver about payment confirmation
-      await fetchAPI(`/(api)/ride/${rideId}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          payment_confirmed: true,
-          payment_method: selectedMethod,
-        }),
-      });
-    } catch (error: any) {
-      console.error("Payment error:", error);
+      // Show success confirmation with driver on the way message
       Alert.alert(
-        "Payment Failed",
-        error.message || "Failed to process payment. Please try again."
+        "Payment Confirmed! 🎉",
+        `Your ${selectedMethod} payment of $${amount} has been confirmed. Your driver is on the way and will arrive shortly.`,
+        [
+          {
+            text: "Great!",
+            onPress: () => {
+              console.log("User acknowledged payment confirmation");
+            },
+          },
+        ]
       );
+
+      // Optional: Notify driver about payment confirmation
+      try {
+        // FIXED: Use the correct endpoint format
+        await fetchAPI(`/(api)/ride/status`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ride_id: rideId,
+            payment_confirmed: true,
+            payment_method: selectedMethod,
+          }),
+        });
+        console.log("✅ Driver notified about payment confirmation");
+      } catch (notificationError) {
+        console.warn(
+          "⚠️ Could not notify driver, but payment was recorded:",
+          notificationError
+        );
+      }
+    } catch (error: any) {
+      console.error("❌ Payment confirmation error:", error);
+
+      let errorMessage = "Failed to confirm payment. Please try again.";
+
+      if (error.message.includes("value too long")) {
+        errorMessage = "Payment information too long. Please contact support.";
+      } else if (error.message.includes("Ride not found")) {
+        errorMessage = "Ride not found. Please start over.";
+      } else if (error.message.includes("Invalid ride ID")) {
+        errorMessage = "Invalid ride information. Please try booking again.";
+      }
+
+      Alert.alert("Payment Failed", errorMessage);
     } finally {
       setProcessing(false);
     }
   };
+
+  // If payment is already confirmed, show success state
+  if (paymentConfirmed) {
+    return (
+      <View className="flex flex-col w-full mt-10 items-center justify-center">
+        <View className="bg-green-50 border border-green-200 rounded-2xl p-6 w-full">
+          <Text className="text-2xl font-JakartaBold text-green-600 text-center mb-3">
+            Payment Confirmed! ✅
+          </Text>
+          <Text className="text-lg font-JakartaSemiBold text-center mb-2">
+            {selectedMethod
+              ? paymentMethods.find((m) => m.id === selectedMethod)?.name
+              : "Payment"}{" "}
+            of ${amount} Confirmed
+          </Text>
+          <Text className="text-green-700 text-center font-JakartaMedium">
+            Your driver is on the way and will arrive shortly.
+          </Text>
+          <Text className="text-gray-600 text-center mt-3 text-sm">
+            Ride ID: #{rideId}
+          </Text>
+        </View>
+
+        <View className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 w-full">
+          <Text className="text-blue-800 font-JakartaSemiBold text-center">
+            What&apos;s Next?
+          </Text>
+          <Text className="text-blue-700 text-center mt-2 text-sm">
+            • Driver is navigating to your location{"\n"}• Have your payment
+            ready{"\n"}• You&apos;ll receive updates on driver&apos;s ETA
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View className="flex flex-col w-full mt-10">
@@ -141,9 +212,14 @@ const Payment = ({
                 : "border-gray-200 bg-white"
             }`}
           >
-            <View className="flex flex-row items-center">
-              <Text className="text-lg font-JakartaMedium ml-3">
-                {method.name}
+            <View className="flex flex-col flex-1">
+              <View className="flex flex-row items-center">
+                <Text className="text-lg font-JakartaMedium ml-3">
+                  {method.name}
+                </Text>
+              </View>
+              <Text className="text-gray-500 text-sm mt-1 ml-3">
+                {method.description}
               </Text>
             </View>
 
@@ -163,11 +239,11 @@ const Payment = ({
         <Text className="font-JakartaSemiBold text-lg mb-2">
           Payment Summary
         </Text>
-        <View className="flex-row justify-between">
+        <View className="flex-row justify-between mb-2">
           <Text className="text-gray-600">Ride Amount:</Text>
-          <Text className="font-JakartaSemiBold">${amount}</Text>
+          <Text className="font-JakartaSemiBold text-green-600">${amount}</Text>
         </View>
-        <View className="flex-row justify-between mt-1">
+        <View className="flex-row justify-between mb-2">
           <Text className="text-gray-600">Payment Method:</Text>
           <Text className="font-JakartaSemiBold">
             {selectedMethod
@@ -175,13 +251,29 @@ const Payment = ({
               : "Not selected"}
           </Text>
         </View>
+        <View className="border-t border-gray-300 mt-2 pt-2">
+          <Text className="text-gray-500 text-sm">
+            This amount will be recorded with your selected payment method.
+          </Text>
+        </View>
       </View>
 
       <CustomButton
-        title={processing ? "Processing..." : "Confirm Payment"}
-        onPress={handlePayment}
+        title={
+          processing
+            ? "Confirming Payment..."
+            : `Confirm ${selectedMethod ? paymentMethods.find((m) => m.id === selectedMethod)?.name : ""} Payment`
+        }
+        onPress={handlePaymentConfirmation}
         disabled={processing || !selectedMethod}
+        bgVariant="success"
       />
+
+      {processing && (
+        <Text className="text-center text-gray-500 mt-3 text-sm">
+          Securing your payment method and notifying driver...
+        </Text>
+      )}
     </View>
   );
 };

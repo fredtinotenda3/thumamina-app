@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import CustomButton from "@/components/CustomButton";
 import InputField from "@/components/InputField";
+import RideNotification from "@/components/RideNotification";
 import { icons, images } from "@/constants";
 import { fetchAPI } from "@/lib/fetch";
 
@@ -73,8 +74,6 @@ const DriverRegistration = () => {
   const [locationLoading, setLocationLoading] = useState(false);
 
   // Ride request states
-  const [currentRideRequest, setCurrentRideRequest] =
-    useState<RideRequest | null>(null);
   const [rideRequests, setRideRequests] = useState<RideRequest[]>([]);
   const [processingRide, setProcessingRide] = useState(false);
 
@@ -83,16 +82,17 @@ const DriverRegistration = () => {
     checkDriverExistence();
   }, []);
 
-  // Check for ride requests when online
-  useEffect(() => {
-    if (!isOnline || !driverData?.id) return;
+  const handleRideAccepted = (rideId: number) => {
+    console.log(`Ride ${rideId} accepted`);
+    // Remove the accepted ride from the list
+    setRideRequests((prev) => prev.filter((ride) => ride.ride_id !== rideId));
+  };
 
-    const interval = setInterval(() => {
-      checkForRideRequests();
-    }, 10000); // Check every 10 seconds
-
-    return () => clearInterval(interval);
-  }, [isOnline, driverData?.id]);
+  const handleRideRejected = (rideId: number) => {
+    console.log(`Ride ${rideId} rejected`);
+    // Remove the rejected ride from the list
+    setRideRequests((prev) => prev.filter((ride) => ride.ride_id !== rideId));
+  };
 
   // Get current location
   const getCurrentLocation = async () => {
@@ -160,11 +160,6 @@ const DriverRegistration = () => {
           // Otherwise get current location
           await getCurrentLocation();
         }
-
-        // Load existing ride requests
-        if (response.driver.is_online) {
-          checkForRideRequests();
-        }
       } else {
         // Not registered, get location for registration
         await getCurrentLocation();
@@ -175,35 +170,6 @@ const DriverRegistration = () => {
       await getCurrentLocation();
     } finally {
       setCheckingDriver(false);
-    }
-  };
-
-  // Check for ride requests
-  const checkForRideRequests = async () => {
-    if (!driverData?.id) return;
-
-    try {
-      const response = await fetchAPI(
-        `/(api)/driver/rides?driver_id=${driverData.id}`
-      );
-
-      if (response.data && response.data.length > 0) {
-        const pendingRides = response.data.filter(
-          (ride: RideRequest) => ride.status === "requested"
-        );
-
-        setRideRequests(pendingRides);
-
-        // Show the first pending ride if we don't have a current one
-        if (pendingRides.length > 0 && !currentRideRequest) {
-          setCurrentRideRequest(pendingRides[0]);
-        }
-      } else {
-        setRideRequests([]);
-        setCurrentRideRequest(null);
-      }
-    } catch (error) {
-      console.error("Error checking ride requests:", error);
     }
   };
 
@@ -286,13 +252,9 @@ const DriverRegistration = () => {
           `You are now ${newOnlineStatus ? "online" : "offline"}`
         );
 
-        // If going online, check for ride requests
-        if (newOnlineStatus) {
-          checkForRideRequests();
-        } else {
-          // If going offline, clear ride requests
+        // If going offline, clear ride requests
+        if (!newOnlineStatus) {
           setRideRequests([]);
-          setCurrentRideRequest(null);
         }
       } else {
         throw new Error("No data in response");
@@ -338,58 +300,6 @@ const DriverRegistration = () => {
     } catch (error) {
       console.error("Error updating location:", error);
       Alert.alert("Error", "Failed to update location");
-    }
-  };
-
-  const handleAcceptRide = async (rideId: number) => {
-    if (!rideId) return;
-
-    setProcessingRide(true);
-    try {
-      const response = await fetchAPI(`/(api)/ride/${rideId}/accept`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accepted: true }),
-      });
-
-      if (response.data) {
-        Alert.alert("Success", "Ride accepted! Get ready for pickup.");
-        // Remove from current requests
-        setRideRequests((prev) =>
-          prev.filter((ride) => ride.ride_id !== rideId)
-        );
-        setCurrentRideRequest(null);
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to accept ride");
-    } finally {
-      setProcessingRide(false);
-    }
-  };
-
-  const handleRejectRide = async (rideId: number) => {
-    if (!rideId) return;
-
-    setProcessingRide(true);
-    try {
-      const response = await fetchAPI(`/(api)/ride/${rideId}/accept`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accepted: false }),
-      });
-
-      if (response.data) {
-        Alert.alert("Ride Rejected", "The rider has been notified.");
-        // Remove from current requests
-        setRideRequests((prev) =>
-          prev.filter((ride) => ride.ride_id !== rideId)
-        );
-        setCurrentRideRequest(null);
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to reject ride");
-    } finally {
-      setProcessingRide(false);
     }
   };
 
@@ -441,54 +351,10 @@ const DriverRegistration = () => {
         <Text className="text-lg font-JakartaSemiBold mb-3">
           Active Ride Requests ({rideRequests.length})
         </Text>
-
-        {rideRequests.map((ride, index) => (
-          <View
-            key={ride.ride_id}
-            className="bg-white border border-general-300 rounded-lg p-4 mb-3 shadow-sm"
-          >
-            <View className="flex-row justify-between items-start mb-3">
-              <Text className="font-JakartaSemiBold text-lg">
-                Ride Request #{index + 1}
-              </Text>
-              <Text className="text-green-600 font-JakartaSemiBold">
-                ${(ride.fare_price / 100).toFixed(2)}
-              </Text>
-            </View>
-
-            <View className="mb-3">
-              <Text className="font-JakartaMedium text-gray-700">From:</Text>
-              <Text className="text-gray-600 ml-2">{ride.origin_address}</Text>
-
-              <Text className="font-JakartaMedium text-gray-700 mt-2">To:</Text>
-              <Text className="text-gray-600 ml-2">
-                {ride.destination_address}
-              </Text>
-            </View>
-
-            <View className="flex-row justify-between mb-4">
-              <Text className="text-gray-600">Time: {ride.ride_time} min</Text>
-              <Text className="text-gray-600">Rider ID: {ride.user_id}</Text>
-            </View>
-
-            <View className="flex-row space-x-3">
-              <CustomButton
-                title="Reject"
-                onPress={() => handleRejectRide(ride.ride_id)}
-                bgVariant="danger"
-                className="flex-1"
-                disabled={processingRide}
-              />
-              <CustomButton
-                title="Accept"
-                onPress={() => handleAcceptRide(ride.ride_id)}
-                bgVariant="success"
-                className="flex-1"
-                disabled={processingRide}
-              />
-            </View>
-          </View>
-        ))}
+        <Text className="text-gray-600 text-sm mb-3">
+          Ride requests will appear as notifications above. Click on them to
+          accept or reject.
+        </Text>
       </View>
     );
   };
@@ -520,6 +386,16 @@ const DriverRegistration = () => {
               {isRegistered ? "Driver Dashboard" : "Driver Registration"}
             </Text>
           </View>
+
+          {/* Ride Notification Component */}
+          {isRegistered && driverData && (
+            <RideNotification
+              driverId={driverData.id}
+              isOnline={isOnline}
+              onRideAccepted={handleRideAccepted}
+              onRideRejected={handleRideRejected}
+            />
+          )}
 
           {!isRegistered ? (
             <>
