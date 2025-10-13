@@ -100,6 +100,17 @@ export default function Layout() {
           ),
         }}
       />
+
+      <Tabs.Screen
+        name="driver-subscription"
+        options={{
+          title: "Subscription",
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon source={icons.dollar} focused={focused} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
